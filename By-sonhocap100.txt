@@ -15,6 +15,7 @@ local Settings = {
     Tracer = true,
     Name = true,
     Distance = true,
+    MaxDistance = 50000, -- Tầm xa tối đa (gần như vô hạn)
     TracerOrigin = "Bottom",
     Color = Color3.fromRGB(255, 0, 0)
 }
@@ -27,7 +28,7 @@ local PresetColors = {
 
 local ESP = {}
 
--- --- HÀM TẠO ĐỐI TƯỢNG VẼ (Drawing API) ---
+-- --- HÀM TẠO/XÓA ĐỐI TƯỢNG VẼ ---
 local function CreateLine()
     local line = Drawing.new("Line")
     line.Thickness = 1.5; line.Transparency = 1; line.Visible = false
@@ -35,7 +36,7 @@ local function CreateLine()
 end
 
 local function AddESP(player)
-    if player == LP then return end
+    if player == LP or ESP[player] then return end
     local objects = {
         BoxLines = {}, SkeletonLines = {},
         Tracer = CreateLine(), Name = Drawing.new("Text")
@@ -54,223 +55,180 @@ local function RemoveESP(player)
     end
 end
 
--- --- RENDER LOGIC ---
-RunService.RenderStepped:Connect(function()
-    for player, obj in pairs(ESP) do
-        local char = player.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChild("Humanoid")
-        
-        if Settings.Enabled and char and hrp and hum and hum.Health > 0 then
-            local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-            if onScreen then
-                -- Vẽ Box 3D
-                if Settings.Box3D then
-                    local size = Vector3.new(1.8, 2.8, 1.2)
-                    local cf = hrp.CFrame
-                    local p = {
-                        Camera:WorldToViewportPoint((cf * CFrame.new(size.X, size.Y, size.Z)).Position),
-                        Camera:WorldToViewportPoint((cf * CFrame.new(-size.X, size.Y, size.Z)).Position),
-                        Camera:WorldToViewportPoint((cf * CFrame.new(-size.X, -size.Y, size.Z)).Position),
-                        Camera:WorldToViewportPoint((cf * CFrame.new(size.X, -size.Y, size.Z)).Position),
-                        Camera:WorldToViewportPoint((cf * CFrame.new(size.X, size.Y, -size.Z)).Position),
-                        Camera:WorldToViewportPoint((cf * CFrame.new(-size.X, size.Y, -size.Z)).Position),
-                        Camera:WorldToViewportPoint((cf * CFrame.new(-size.X, -size.Y, -size.Z)).Position),
-                        Camera:WorldToViewportPoint((cf * CFrame.new(size.X, -size.Y, -size.Z)).Position)
-                    }
-                    local edges = {{1,2},{2,3},{3,4},{4,1},{5,6},{6,7},{7,8},{8,5},{1,5},{2,6},{3,7},{4,8}}
-                    for i, edge in pairs(edges) do
-                        local l = obj.BoxLines[i]
-                        l.From = Vector2.new(p[edge[1]].X, p[edge[1]].Y)
-                        l.To = Vector2.new(p[edge[2]].X, p[edge[2]].Y)
-                        l.Color = Settings.Color; l.Visible = true
-                    end
-                else for _, l in pairs(obj.BoxLines) do l.Visible = false end end
+local function HideAll(obj)
+    for _, l in pairs(obj.BoxLines) do l.Visible = false end
+    for _, l in pairs(obj.SkeletonLines) do l.Visible = false end
+    obj.Tracer.Visible = false; obj.Name.Visible = false
+end
 
-                -- Vẽ Skeleton
-                if Settings.Skeleton then
-                    local function getV2(partName)
-                        local p = char:FindFirstChild(partName)
-                        if p then 
-                            local v, vis = Camera:WorldToViewportPoint(p.Position)
-                            return Vector2.new(v.X, v.Y), vis
-                        end
-                        return nil, false
-                    end
-                    local joints = hum.RigType == Enum.HumanoidRigType.R15 and {
-                        {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
-                        {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"},
-                        {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"},
-                        {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"},
-                        {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}
-                    } or {
-                        {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"},
-                        {"Torso", "Left Leg"}, {"Torso", "Right Leg"}
-                    }
-                    for i, joint in pairs(joints) do
-                        local p1, vis1 = getV2(joint[1]); local p2, vis2 = getV2(joint[2])
-                        local l = obj.SkeletonLines[i]
-                        if p1 and p2 and (vis1 or vis2) then
-                            l.From = p1; l.To = p2; l.Color = Settings.Color; l.Visible = true
-                        else l.Visible = false end
-                    end
-                else for _, l in pairs(obj.SkeletonLines) do l.Visible = false end end
-
-                -- Vẽ Tracer
-                if Settings.Tracer then
-                    local s = Camera.ViewportSize
-                    local o = Settings.TracerOrigin == "Top" and Vector2.new(s.X/2, 0) or Settings.TracerOrigin == "Center" and Vector2.new(s.X/2, s.Y/2) or Vector2.new(s.X/2, s.Y)
-                    obj.Tracer.From = o; obj.Tracer.To = Vector2.new(pos.X, pos.Y); obj.Tracer.Color = Settings.Color; obj.Tracer.Visible = true
-                else obj.Tracer.Visible = false end
-
-                -- Tên & Khoảng cách
-                if Settings.Name or Settings.Distance then
-                    local t = ""
-                    if Settings.Name then t = player.Name end
-                    if Settings.Distance then t = t .. (t ~= "" and " " or "") .. "[" .. math.floor((Camera.CFrame.Position - hrp.Position).Magnitude) .. "m]" end
-                    obj.Name.Text = t; obj.Name.Position = Vector2.new(pos.X, pos.Y - 60); obj.Name.Color = Settings.Color; obj.Name.Visible = true
-                else obj.Name.Visible = false end
-            else
-                for _, l in pairs(obj.BoxLines) do l.Visible = false end
-                for _, l in pairs(obj.SkeletonLines) do l.Visible = false end
-                obj.Name.Visible = false; obj.Tracer.Visible = false
-            end
-        else
-            for _, l in pairs(obj.BoxLines) do l.Visible = false end
-            for _, l in pairs(obj.SkeletonLines) do l.Visible = false end
-            obj.Name.Visible = false; obj.Tracer.Visible = false
+-- --- HÀM TÌM NHÂN VẬT SIÊU CẤP ---
+-- Tìm bất cứ thứ gì thuộc về Player trong Workspace, kể cả khi map chưa load hết
+local function GetCharacter(player)
+    -- Thử lấy nhân vật chính thức
+    if player.Character and player.Character.Parent then return player.Character end
+    
+    -- Quét diện rộng trong Workspace (Dành cho trường hợp map chưa load xong hoặc StreamingEnabled)
+    for _, v in pairs(workspace:GetChildren()) do
+        if v.Name == player.Name and v:IsA("Model") then
+            return v
         end
+    end
+    return nil
+end
+
+-- --- RENDER LOGIC (MAX DISTANCE & LOAD FIX) ---
+RunService.RenderStepped:Connect(function()
+    for _, player in pairs(Players:GetPlayers()) do
+        if not ESP[player] then AddESP(player) continue end
+        local obj = ESP[player]
+        
+        local char = GetCharacter(player)
+        -- Tìm RootPart (Chỉ cần có 1 bộ phận bất kỳ là vẽ được ESP)
+        local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart"))
+        
+        if not Settings.Enabled or not char or not hrp then
+            HideAll(obj)
+            continue
+        end
+
+        -- Tính khoảng cách
+        local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
+        
+        -- Nếu quá xa hoặc đứng sau lưng camera
+        local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+        
+        if not onScreen or dist > Settings.MaxDistance then
+            HideAll(obj)
+            continue
+        end
+
+        -- --- VẼ BOX 3D (Cải tiến độ mượt khi ở xa) ---
+        if Settings.Box3D then
+            local size = Vector3.new(2, 3, 1.2)
+            local cf = hrp.CFrame
+            local points = {
+                Camera:WorldToViewportPoint((cf * CFrame.new(size.X, size.Y, size.Z)).Position),
+                Camera:WorldToViewportPoint((cf * CFrame.new(-size.X, size.Y, size.Z)).Position),
+                Camera:WorldToViewportPoint((cf * CFrame.new(-size.X, -size.Y, size.Z)).Position),
+                Camera:WorldToViewportPoint((cf * CFrame.new(size.X, -size.Y, size.Z)).Position),
+                Camera:WorldToViewportPoint((cf * CFrame.new(size.X, size.Y, -size.Z)).Position),
+                Camera:WorldToViewportPoint((cf * CFrame.new(-size.X, size.Y, -size.Z)).Position),
+                Camera:WorldToViewportPoint((cf * CFrame.new(-size.X, -size.Y, -size.Z)).Position),
+                Camera:WorldToViewportPoint((cf * CFrame.new(size.X, -size.Y, -size.Z)).Position)
+            }
+            local edges = {{1,2},{2,3},{3,4},{4,1},{5,6},{6,7},{7,8},{8,5},{1,5},{2,6},{3,7},{4,8}}
+            for i, edge in pairs(edges) do
+                local l = obj.BoxLines[i]
+                l.From = Vector2.new(points[edge[1]].X, points[edge[1]].Y)
+                l.To = Vector2.new(points[edge[2]].X, points[edge[2]].Y)
+                l.Color = Settings.Color; l.Visible = true
+            end
+        else for _, l in pairs(obj.BoxLines) do l.Visible = false end end
+
+        -- --- VẼ SKELETON (Tự ẩn nếu ở quá xa để tránh rối mắt) ---
+        if Settings.Skeleton and dist < 1000 then -- Chỉ hiện xương trong phạm vi 1000m
+            local function getV2(partName)
+                local p = char:FindFirstChild(partName)
+                if p then 
+                    local v, vis = Camera:WorldToViewportPoint(p.Position)
+                    return Vector2.new(v.X, v.Y), vis
+                end
+                return nil, false
+            end
+            local joints = {
+                {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+                {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"},
+                {"Torso", "Left Leg"}, {"Torso", "Right Leg"}
+            }
+            for i, joint in pairs(joints) do
+                local p1, vis1 = getV2(joint[1]); local p2, vis2 = getV2(joint[2])
+                local l = obj.SkeletonLines[i]
+                if p1 and p2 and (vis1 or vis2) then
+                    l.From = p1; l.To = p2; l.Color = Settings.Color; l.Visible = true
+                else l.Visible = false end
+            end
+        else for _, l in pairs(obj.SkeletonLines) do l.Visible = false end end
+
+        -- --- VẼ TRACER ---
+        if Settings.Tracer then
+            local s = Camera.ViewportSize
+            local o = Settings.TracerOrigin == "Top" and Vector2.new(s.X/2, 0) or Settings.TracerOrigin == "Center" and Vector2.new(s.X/2, s.Y/2) or Vector2.new(s.X/2, s.Y)
+            obj.Tracer.From = o; obj.Tracer.To = Vector2.new(pos.X, pos.Y); obj.Tracer.Color = Settings.Color; obj.Tracer.Visible = true
+        else obj.Tracer.Visible = false end
+
+        -- --- TÊN & KHOẢNG CÁCH ---
+        if Settings.Name or Settings.Distance then
+            local t = (Settings.Name and player.Name or "") .. (Settings.Distance and " [" .. math.floor(dist) .. "m]" or "")
+            obj.Name.Text = t; obj.Name.Position = Vector2.new(pos.X, pos.Y - 60); obj.Name.Color = Settings.Color; obj.Name.Visible = true
+        else obj.Name.Visible = false end
     end
 end)
 
--- --- GIAO DIỆN (GUI) ---
+-- --- PHẦN GIAO DIỆN (GIỮ NGUYÊN) ---
 local ScreenGui = Instance.new("ScreenGui", LP.PlayerGui)
 ScreenGui.ResetOnSpawn = false
-
--- KHUNG MENU CHÍNH
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 320)
-MainFrame.Position = UDim2.new(0.5, -110, 0.2, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-MainFrame.Visible = false
+MainFrame.Size = UDim2.new(0, 220, 0, 320); MainFrame.Position = UDim2.new(0.5, -110, 0.2, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20); MainFrame.Visible = false
 Instance.new("UICorner", MainFrame)
-
--- KHUNG CUỘN
 local Scroll = Instance.new("ScrollingFrame", MainFrame)
-Scroll.Size = UDim2.new(1, 0, 1, -10)
-Scroll.Position = UDim2.new(0, 0, 0, 5)
-Scroll.BackgroundTransparency = 1
-Scroll.CanvasSize = UDim2.new(0, 0, 0, 420)
-Scroll.ScrollBarThickness = 3
-local Layout = Instance.new("UIListLayout", Scroll)
-Layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-Layout.Padding = UDim.new(0, 8)
-
--- NÚT MỞ/ĐÓNG DUY NHẤT (Có thể kéo thả)
+Scroll.Size = UDim2.new(1, 0, 1, -10); Scroll.Position = UDim2.new(0, 0, 0, 5); Scroll.BackgroundTransparency = 1
+Scroll.CanvasSize = UDim2.new(0, 0, 0, 420); Scroll.ScrollBarThickness = 3
+Instance.new("UIListLayout", Scroll).HorizontalAlignment = Enum.HorizontalAlignment.Center
+Scroll.UIListLayout.Padding = UDim.new(0, 8)
 local ToggleBtn = Instance.new("TextButton", ScreenGui)
-ToggleBtn.Size = UDim2.new(0, 120, 0, 35)
-ToggleBtn.Position = UDim2.new(0, 10, 0, 50)
-ToggleBtn.Text = "MỞ MENU"
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
-ToggleBtn.TextColor3 = Color3.new(1, 1, 1)
-ToggleBtn.Active = true -- Bật Active để có thể kéo mượt hơn
-Instance.new("UICorner", ToggleBtn)
+ToggleBtn.Size = UDim2.new(0, 120, 0, 35); ToggleBtn.Position = UDim2.new(0, 10, 0, 50)
+ToggleBtn.Text = "MỞ MENU"; ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+ToggleBtn.TextColor3 = Color3.new(1, 1, 1); Instance.new("UICorner", ToggleBtn)
 
--- HÀM KÉO THẢ CHUNG CHO CẢ PC VÀ MOBILE
 local function MakeDraggable(guiObject)
-    local dragging = false
-    local dragInput, dragStart, startPos
-
+    local dragging, dragInput, dragStart, startPos
     guiObject.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = guiObject.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
+            dragging = true; dragStart = input.Position; startPos = guiObject.Position
+            input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
         end
     end)
-
-    guiObject.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            guiObject.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
+    guiObject.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end end)
+    UserInputService.InputChanged:Connect(function(input) if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        guiObject.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end end)
 end
-
--- ÁP DỤNG KÉO THẢ CHO MENU VÀ NÚT MỞ MENU
-MakeDraggable(MainFrame)
-MakeDraggable(ToggleBtn)
-
--- XỬ LÝ CLICK NÚT MỞ/ĐÓNG 
--- Chỉ kích hoạt khi thả tay ra (tránh lỗi bấm nhầm khi đang kéo)
+MakeDraggable(MainFrame); MakeDraggable(ToggleBtn)
 ToggleBtn.MouseButton1Click:Connect(function()
     MainFrame.Visible = not MainFrame.Visible
     ToggleBtn.Text = MainFrame.Visible and "ĐÓNG MENU" or "MỞ MENU"
     ToggleBtn.BackgroundColor3 = MainFrame.Visible and Color3.fromRGB(200, 50, 50) or Color3.fromRGB(0, 120, 200)
 end)
-
--- HÀM TẠO NÚT CẢI TIẾN
 local function createBtn(label, settingKey, callback)
     local b = Instance.new("TextButton", Scroll)
-    b.Size = UDim2.new(0.9, 0, 0, 35)
-    b.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.Text = label
-    Instance.new("UICorner", b)
-    
-    local function updateStatus()
+    b.Size = UDim2.new(0.9, 0, 0, 35); b.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    b.TextColor3 = Color3.new(1, 1, 1); b.Text = label; Instance.new("UICorner", b)
+    local function update()
         if settingKey and typeof(Settings[settingKey]) == "boolean" then
             b.Text = label .. ": " .. (Settings[settingKey] and "ON" or "OFF")
             b.TextColor3 = Settings[settingKey] and Color3.new(0, 1, 0.5) or Color3.new(1, 0.3, 0.3)
-        elseif settingKey == "TracerOrigin" then
-            b.Text = "GỐC: " .. Settings.TracerOrigin
-            b.TextColor3 = Color3.new(1, 1, 1)
-        else
-            b.Text = label
-            b.TextColor3 = Color3.new(1, 1, 1)
-        end
+        elseif settingKey == "TracerOrigin" then b.Text = "GỐC: " .. Settings.TracerOrigin
+        else b.Text = label end
     end
-
-    b.MouseButton1Click:Connect(function()
-        if callback then callback(b) elseif settingKey then Settings[settingKey] = not Settings[settingKey] end
-        updateStatus()
-    end)
-    
-    updateStatus(); return b
+    b.MouseButton1Click:Connect(function() if callback then callback(b) elseif settingKey then Settings[settingKey] = not Settings[settingKey] end update() end)
+    update(); return b
 end
-
--- TẠO CÁC NÚT BÊN TRONG MENU
 createBtn("ESP TỔNG", "Enabled")
 createBtn("HIỆN TÊN", "Name")
 createBtn("KHOẢNG CÁCH", "Distance")
 createBtn("BOX 3D", "Box3D")
 createBtn("XƯƠNG", "Skeleton")
 createBtn("TRACER", "Tracer")
-createBtn("GỐC TRACER", "TracerOrigin", function(b)
+createBtn("GỐC TRACER", "TracerOrigin", function()
     if Settings.TracerOrigin == "Bottom" then Settings.TracerOrigin = "Center"
     elseif Settings.TracerOrigin == "Center" then Settings.TracerOrigin = "Top"
     else Settings.TracerOrigin = "Bottom" end
 end)
-
--- COLOR PICKER
 local ColorFrame = Instance.new("Frame", MainFrame)
-ColorFrame.Size = UDim2.new(0, 150, 0, 150); ColorFrame.Position = UDim2.new(1.05, 0, 0, 0)
-ColorFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30); ColorFrame.Visible = false
-Instance.new("UICorner", ColorFrame)
-local Grid = Instance.new("UIGridLayout", ColorFrame); Grid.CellSize = UDim2.new(0, 45, 0, 45)
-
+ColorFrame.Size = UDim2.new(0, 150, 0, 150); ColorFrame.Position = UDim2.new(1.05, 0, 0, 0); ColorFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30); ColorFrame.Visible = false
+Instance.new("UICorner", ColorFrame); Instance.new("UIGridLayout", ColorFrame).CellSize = UDim2.new(0, 45, 0, 45)
 for _, c in pairs(PresetColors) do
     local cb = Instance.new("TextButton", ColorFrame)
     cb.BackgroundColor3 = c; cb.Text = ""; Instance.new("UICorner", cb)
@@ -278,7 +236,5 @@ for _, c in pairs(PresetColors) do
 end
 createBtn("CHỌN MÀU SẮC", nil, function() ColorFrame.Visible = not ColorFrame.Visible end)
 
--- CHẠY
 for _, p in pairs(Players:GetPlayers()) do AddESP(p) end
 Players.PlayerAdded:Connect(AddESP); Players.PlayerRemoving:Connect(RemoveESP)
-          
