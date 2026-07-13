@@ -1,4 +1,4 @@
--- Chờ game load
+-- Chờ game tải hoàn tất
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 local Players = game:GetService("Players")
@@ -7,15 +7,16 @@ local UserInputService = game:GetService("UserInputService")
 local LP = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- --- CẤU HÌNH ---
+-- --- CẤU HÌNH HỆ THỐNG ---
 local Settings = {
     Enabled = true,
+    TeamCheck = true, -- [MỚI] TRUE = Ẩn đồng đội, chỉ hiện đối thủ | FALSE = Hiện tất cả
     Box3D = true,
     Skeleton = true,
     Tracer = true,
     Name = true,
     Distance = true,
-    MaxDistance = 50000, -- Tầm xa tối đa (gần như vô hạn)
+    MaxDistance = 50000, 
     TracerOrigin = "Bottom",
     Color = Color3.fromRGB(255, 0, 0)
 }
@@ -28,7 +29,7 @@ local PresetColors = {
 
 local ESP = {}
 
--- --- HÀM TẠO/XÓA ĐỐI TƯỢNG VẼ ---
+-- --- HÀM KHỞI TẠO ĐỐI TƯỢNG VẼ ---
 local function CreateLine()
     local line = Drawing.new("Line")
     line.Thickness = 1.5; line.Transparency = 1; line.Visible = false
@@ -37,12 +38,17 @@ end
 
 local function AddESP(player)
     if player == LP or ESP[player] then return end
+    
     local objects = {
-        BoxLines = {}, SkeletonLines = {},
-        Tracer = CreateLine(), Name = Drawing.new("Text")
+        BoxLines = {}, 
+        SkeletonLines = {},
+        Tracer = CreateLine(), 
+        Name = Drawing.new("Text")
     }
+    
     for i = 1, 12 do table.insert(objects.BoxLines, CreateLine()) end
     for i = 1, 15 do table.insert(objects.SkeletonLines, CreateLine()) end
+    
     objects.Name.Size = 14; objects.Name.Center = true; objects.Name.Outline = true
     ESP[player] = objects
 end
@@ -61,40 +67,32 @@ local function HideAll(obj)
     obj.Tracer.Visible = false; obj.Name.Visible = false
 end
 
--- --- HÀM TÌM NHÂN VẬT SIÊU CẤP ---
--- Tìm bất cứ thứ gì thuộc về Player trong Workspace, kể cả khi map chưa load hết
 local function GetCharacter(player)
-    -- Thử lấy nhân vật chính thức
     if player.Character and player.Character.Parent then return player.Character end
-    
-    -- Quét diện rộng trong Workspace (Dành cho trường hợp map chưa load xong hoặc StreamingEnabled)
     for _, v in pairs(workspace:GetChildren()) do
-        if v.Name == player.Name and v:IsA("Model") then
-            return v
-        end
+        if v.Name == player.Name and v:IsA("Model") then return v end
     end
     return nil
 end
 
--- --- RENDER LOGIC (MAX DISTANCE & LOAD FIX) ---
+-- --- VÒNG LẶP RENDER CHÍNH ---
 RunService.RenderStepped:Connect(function()
     for _, player in pairs(Players:GetPlayers()) do
         if not ESP[player] then AddESP(player) continue end
         local obj = ESP[player]
         
         local char = GetCharacter(player)
-        -- Tìm RootPart (Chỉ cần có 1 bộ phận bất kỳ là vẽ được ESP)
         local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart"))
         
-        if not Settings.Enabled or not char or not hrp then
+        -- [MỚI] KIỂM TRA ĐỒNG ĐỘI: Nếu bật TeamCheck và người chơi chung đội với bạn -> Ẩn ESP
+        local isTeamate = Settings.TeamCheck and player.Team == LP.Team
+        
+        if not Settings.Enabled or not char or not hrp or isTeamate then
             HideAll(obj)
             continue
         end
 
-        -- Tính khoảng cách
         local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
-        
-        -- Nếu quá xa hoặc đứng sau lưng camera
         local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
         
         if not onScreen or dist > Settings.MaxDistance then
@@ -102,7 +100,7 @@ RunService.RenderStepped:Connect(function()
             continue
         end
 
-        -- --- VẼ BOX 3D (Cải tiến độ mượt khi ở xa) ---
+        -- --- 1. VẼ HÌNH HỘP 3D ---
         if Settings.Box3D then
             local size = Vector3.new(2, 3, 1.2)
             local cf = hrp.CFrame
@@ -125,8 +123,8 @@ RunService.RenderStepped:Connect(function()
             end
         else for _, l in pairs(obj.BoxLines) do l.Visible = false end end
 
-        -- --- VẼ SKELETON (Tự ẩn nếu ở quá xa để tránh rối mắt) ---
-        if Settings.Skeleton and dist < 1000 then -- Chỉ hiện xương trong phạm vi 1000m
+        -- --- 2. VẼ KHUNG XƯƠNG ---
+        if Settings.Skeleton and dist < 1000 then 
             local function getV2(partName)
                 local p = char:FindFirstChild(partName)
                 if p then 
@@ -138,25 +136,27 @@ RunService.RenderStepped:Connect(function()
             local joints = {
                 {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
                 {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"},
-                {"Torso", "Left Leg"}, {"Torso", "Right Leg"}
+                {"Torso", "Left Leg"}, {"Torso", "Right Leg"},
+                {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"},
+                {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}
             }
             for i, joint in pairs(joints) do
                 local p1, vis1 = getV2(joint[1]); local p2, vis2 = getV2(joint[2])
                 local l = obj.SkeletonLines[i]
-                if p1 and p2 and (vis1 or vis2) then
+                if l and p1 and p2 and (vis1 or vis2) then
                     l.From = p1; l.To = p2; l.Color = Settings.Color; l.Visible = true
-                else l.Visible = false end
+                elseif l then l.Visible = false end
             end
         else for _, l in pairs(obj.SkeletonLines) do l.Visible = false end end
 
-        -- --- VẼ TRACER ---
+        -- --- 3. VẼ TRACER ---
         if Settings.Tracer then
             local s = Camera.ViewportSize
             local o = Settings.TracerOrigin == "Top" and Vector2.new(s.X/2, 0) or Settings.TracerOrigin == "Center" and Vector2.new(s.X/2, s.Y/2) or Vector2.new(s.X/2, s.Y)
             obj.Tracer.From = o; obj.Tracer.To = Vector2.new(pos.X, pos.Y); obj.Tracer.Color = Settings.Color; obj.Tracer.Visible = true
         else obj.Tracer.Visible = false end
 
-        -- --- TÊN & KHOẢNG CÁCH ---
+        -- --- 4. TÊN & KHOẢNG CÁCH ---
         if Settings.Name or Settings.Distance then
             local t = (Settings.Name and player.Name or "") .. (Settings.Distance and " [" .. math.floor(dist) .. "m]" or "")
             obj.Name.Text = t; obj.Name.Position = Vector2.new(pos.X, pos.Y - 60); obj.Name.Color = Settings.Color; obj.Name.Visible = true
@@ -164,18 +164,22 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- --- PHẦN GIAO DIỆN (GIỮ NGUYÊN) ---
+-- --- GIAO DIỆN ĐIỀU KHIỂN (UI) ---
 local ScreenGui = Instance.new("ScreenGui", LP.PlayerGui)
 ScreenGui.ResetOnSpawn = false
+
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 320); MainFrame.Position = UDim2.new(0.5, -110, 0.2, 0)
+MainFrame.Size = UDim2.new(0, 220, 0, 360) -- Tăng nhẹ chiều cao Menu để chứa nút mới
+MainFrame.Position = UDim2.new(0.5, -110, 0.2, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20); MainFrame.Visible = false
 Instance.new("UICorner", MainFrame)
+
 local Scroll = Instance.new("ScrollingFrame", MainFrame)
 Scroll.Size = UDim2.new(1, 0, 1, -10); Scroll.Position = UDim2.new(0, 0, 0, 5); Scroll.BackgroundTransparency = 1
-Scroll.CanvasSize = UDim2.new(0, 0, 0, 420); Scroll.ScrollBarThickness = 3
+Scroll.CanvasSize = UDim2.new(0, 0, 0, 460); Scroll.ScrollBarThickness = 3
 Instance.new("UIListLayout", Scroll).HorizontalAlignment = Enum.HorizontalAlignment.Center
 Scroll.UIListLayout.Padding = UDim.new(0, 8)
+
 local ToggleBtn = Instance.new("TextButton", ScreenGui)
 ToggleBtn.Size = UDim2.new(0, 120, 0, 35); ToggleBtn.Position = UDim2.new(0, 10, 0, 50)
 ToggleBtn.Text = "MỞ MENU"; ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
@@ -196,11 +200,13 @@ local function MakeDraggable(guiObject)
     end end)
 end
 MakeDraggable(MainFrame); MakeDraggable(ToggleBtn)
+
 ToggleBtn.MouseButton1Click:Connect(function()
     MainFrame.Visible = not MainFrame.Visible
     ToggleBtn.Text = MainFrame.Visible and "ĐÓNG MENU" or "MỞ MENU"
     ToggleBtn.BackgroundColor3 = MainFrame.Visible and Color3.fromRGB(200, 50, 50) or Color3.fromRGB(0, 120, 200)
 end)
+
 local function createBtn(label, settingKey, callback)
     local b = Instance.new("TextButton", Scroll)
     b.Size = UDim2.new(0.9, 0, 0, 35); b.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -209,6 +215,40 @@ local function createBtn(label, settingKey, callback)
         if settingKey and typeof(Settings[settingKey]) == "boolean" then
             b.Text = label .. ": " .. (Settings[settingKey] and "ON" or "OFF")
             b.TextColor3 = Settings[settingKey] and Color3.new(0, 1, 0.5) or Color3.new(1, 0.3, 0.3)
+        elseif settingKey == "TracerOrigin" then b.Text = "GỐC: " .. Settings.TracerOrigin
+        else b.Text = label end
+    end
+    b.MouseButton1Click:Connect(function() if callback then callback(b) elseif settingKey then Settings[settingKey] = not Settings[settingKey] end update() end)
+    update(); return b
+end
+
+-- --- KHỞI TẠO CÁC NÚT BẤM MENU ---
+createBtn("ESP TỔNG", "Enabled")
+createBtn("LỌC ĐỒNG ĐỘI", "TeamCheck") -- [MỚI] Nút bật/tắt lọc đồng đội
+createBtn("HIỆN TÊN", "Name")
+createBtn("KHOẢNG CÁCH", "Distance")
+createBtn("BOX 3D", "Box3D")
+createBtn("XƯƠNG", "Skeleton")
+createBtn("TRACER", "Tracer")
+createBtn("GỐC TRACER", "TracerOrigin", function()
+    if Settings.TracerOrigin == "Bottom" then Settings.TracerOrigin = "Center"
+    elseif Settings.TracerOrigin == "Center" then Settings.TracerOrigin = "Top"
+    else Settings.TracerOrigin = "Bottom" end
+end)
+
+local ColorFrame = Instance.new("Frame", MainFrame)
+ColorFrame.Size = UDim2.new(0, 150, 0, 150); ColorFrame.Position = UDim2.new(1.05, 0, 0, 0); ColorFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30); ColorFrame.Visible = false
+Instance.new("UICorner", ColorFrame); Instance.new("UIGridLayout", ColorFrame).CellSize = UDim2.new(0, 45, 0, 45)
+for _, c in pairs(PresetColors) do
+    local cb = Instance.new("TextButton", ColorFrame)
+    cb.BackgroundColor3 = c; cb.Text = ""; Instance.new("UICorner", cb)
+    cb.MouseButton1Click:Connect(function() Settings.Color = c; ColorFrame.Visible = false end)
+end
+createBtn("CHỌN MÀU SẮC", nil, function() ColorFrame.Visible = not ColorFrame.Visible end)
+
+for _, p in pairs(Players:GetPlayers()) do AddESP(p) end
+Players.PlayerAdded:Connect(AddESP); Players.PlayerRemoving:Connect(RemoveESP)
+    b.TextColor3 = Settings[settingKey] and Color3.new(0, 1, 0.5) or Color3.new(1, 0.3, 0.3)
         elseif settingKey == "TracerOrigin" then b.Text = "GỐC: " .. Settings.TracerOrigin
         else b.Text = label end
     end
