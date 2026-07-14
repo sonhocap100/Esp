@@ -248,33 +248,3 @@ createBtn("CHỌN MÀU SẮC", nil, function() ColorFrame.Visible = not ColorFra
 
 for _, p in pairs(Players:GetPlayers()) do AddESP(p) end
 Players.PlayerAdded:Connect(AddESP); Players.PlayerRemoving:Connect(RemoveESP)
-    b.TextColor3 = Settings[settingKey] and Color3.new(0, 1, 0.5) or Color3.new(1, 0.3, 0.3)
-        elseif settingKey == "TracerOrigin" then b.Text = "GỐC: " .. Settings.TracerOrigin
-        else b.Text = label end
-    end
-    b.MouseButton1Click:Connect(function() if callback then callback(b) elseif settingKey then Settings[settingKey] = not Settings[settingKey] end update() end)
-    update(); return b
-end
-createBtn("ESP TỔNG", "Enabled")
-createBtn("HIỆN TÊN", "Name")
-createBtn("KHOẢNG CÁCH", "Distance")
-createBtn("BOX 3D", "Box3D")
-createBtn("XƯƠNG", "Skeleton")
-createBtn("TRACER", "Tracer")
-createBtn("GỐC TRACER", "TracerOrigin", function()
-    if Settings.TracerOrigin == "Bottom" then Settings.TracerOrigin = "Center"
-    elseif Settings.TracerOrigin == "Center" then Settings.TracerOrigin = "Top"
-    else Settings.TracerOrigin = "Bottom" end
-end)
-local ColorFrame = Instance.new("Frame", MainFrame)
-ColorFrame.Size = UDim2.new(0, 150, 0, 150); ColorFrame.Position = UDim2.new(1.05, 0, 0, 0); ColorFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30); ColorFrame.Visible = false
-Instance.new("UICorner", ColorFrame); Instance.new("UIGridLayout", ColorFrame).CellSize = UDim2.new(0, 45, 0, 45)
-for _, c in pairs(PresetColors) do
-    local cb = Instance.new("TextButton", ColorFrame)
-    cb.BackgroundColor3 = c; cb.Text = ""; Instance.new("UICorner", cb)
-    cb.MouseButton1Click:Connect(function() Settings.Color = c; ColorFrame.Visible = false end)
-end
-createBtn("CHỌN MÀU SẮC", nil, function() ColorFrame.Visible = not ColorFrame.Visible end)
-
-for _, p in pairs(Players:GetPlayers()) do AddESP(p) end
-Players.PlayerAdded:Connect(AddESP); Players.PlayerRemoving:Connect(RemoveESP)
